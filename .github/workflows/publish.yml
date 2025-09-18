@@ -1,0 +1,39 @@
+name: Publish Package
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # Required for OIDC
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Ensure npm 11.5.1 or later is installed
+      - name: Update npm
+        run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run test
+      - run: |
+          PACKAGE_NAME=$(jq -r '.name' package.json)
+          PACKAGE_VERSION=$(jq -r '.version' package.json)
+          if npm view "$PACKAGE_NAME" versions | grep -q "$PACKAGE_VERSION"; then
+            echo "Package $PACKAGE_NAME@$PACKAGE_VERSION already exists. Skipping publish."
+          else
+            echo "Publishing $PACKAGE_NAME@$PACKAGE_VERSION..."
+            npm publish --ignore-scripts
+          fi

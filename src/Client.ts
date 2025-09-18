@@ -1,6 +1,6 @@
-import type { Agent } from "http"
+import type { Agent } from "node:http"
 import {
-  Logger,
+  type Logger,
   LogLevel,
   logLevelSeverity,
   makeConsoleLogger,
@@ -13,76 +13,105 @@ import {
 } from "./errors"
 import { pick } from "./utils"
 import {
-  GetBlockParameters,
-  GetBlockResponse,
+  type GetBlockParameters,
+  type GetBlockResponse,
   getBlock,
-  UpdateBlockParameters,
-  UpdateBlockResponse,
+  type UpdateBlockParameters,
+  type UpdateBlockResponse,
   updateBlock,
-  DeleteBlockParameters,
-  DeleteBlockResponse,
+  type DeleteBlockParameters,
+  type DeleteBlockResponse,
   deleteBlock,
-  AppendBlockChildrenParameters,
-  AppendBlockChildrenResponse,
+  type AppendBlockChildrenParameters,
+  type AppendBlockChildrenResponse,
   appendBlockChildren,
-  ListBlockChildrenParameters,
-  ListBlockChildrenResponse,
+  type ListBlockChildrenParameters,
+  type ListBlockChildrenResponse,
   listBlockChildren,
-  ListDatabasesParameters,
-  ListDatabasesResponse,
-  listDatabases,
+  type QueryDataSourceParameters,
+  type QueryDataSourceResponse,
+  queryDataSource,
+  type CreateDataSourceParameters,
+  type CreateDataSourceResponse,
+  createDataSource,
+  type UpdateDataSourceParameters,
+  type UpdateDataSourceResponse,
+  updateDataSource,
+  type GetDataSourceParameters,
+  type GetDataSourceResponse,
+  getDataSource,
+  type CreatePageParameters,
+  type CreatePageResponse,
+  createPage,
+  type GetPageParameters,
+  type GetPageResponse,
+  getPage,
+  type UpdatePageParameters,
+  type UpdatePageResponse,
+  updatePage,
+  type GetUserParameters,
+  type GetUserResponse,
+  getUser,
+  type ListUsersParameters,
+  type ListUsersResponse,
+  listUsers,
+  type SearchParameters,
+  type SearchResponse,
+  search,
+  type GetSelfParameters,
+  type GetSelfResponse,
+  getSelf,
+  type GetPagePropertyParameters,
+  type GetPagePropertyResponse,
+  getPageProperty,
+  type CreateCommentParameters,
+  type CreateCommentResponse,
+  createComment,
+  type ListCommentsParameters,
+  type ListCommentsResponse,
+  listComments,
+  type GetCommentParameters,
+  type GetCommentResponse,
+  getComment,
+  type OauthTokenResponse,
+  type OauthTokenParameters,
+  oauthToken,
+  type OauthIntrospectResponse,
+  type OauthIntrospectParameters,
+  oauthIntrospect,
+  type OauthRevokeResponse,
+  type OauthRevokeParameters,
+  oauthRevoke,
+  type CreateFileUploadParameters,
+  type CreateFileUploadResponse,
+  createFileUpload,
+  type GetFileUploadResponse,
+  type GetFileUploadParameters,
+  getFileUpload,
+  type SendFileUploadParameters,
+  type SendFileUploadResponse,
+  sendFileUpload,
+  type CompleteFileUploadParameters,
+  type CompleteFileUploadResponse,
+  completeFileUpload,
+  type ListFileUploadsParameters,
+  type ListFileUploadsResponse,
+  listFileUploads,
   GetDatabaseParameters,
   GetDatabaseResponse,
   getDatabase,
-  QueryDatabaseParameters,
-  QueryDatabaseResponse,
-  queryDatabase,
-  CreateDatabaseParameters,
   CreateDatabaseResponse,
+  CreateDatabaseParameters,
   createDatabase,
   UpdateDatabaseParameters,
   UpdateDatabaseResponse,
   updateDatabase,
-  CreatePageParameters,
-  CreatePageResponse,
-  createPage,
-  GetPageParameters,
-  GetPageResponse,
-  getPage,
-  UpdatePageParameters,
-  UpdatePageResponse,
-  updatePage,
-  GetUserParameters,
-  GetUserResponse,
-  getUser,
-  ListUsersParameters,
-  ListUsersResponse,
-  listUsers,
-  SearchParameters,
-  SearchResponse,
-  search,
-  GetSelfParameters,
-  GetSelfResponse,
-  getSelf,
-  GetPagePropertyParameters,
-  GetPagePropertyResponse,
-  getPageProperty,
-  CreateCommentParameters,
-  CreateCommentResponse,
-  createComment,
-  ListCommentsParameters,
-  ListCommentsResponse,
-  listComments,
-  OauthTokenResponse,
-  OauthTokenParameters,
-  oauthToken,
 } from "./api-endpoints"
-import nodeFetch from "node-fetch"
 import {
   version as PACKAGE_VERSION,
   name as PACKAGE_NAME,
 } from "../package.json"
-import { SupportedFetch } from "./fetch-types"
+import type { SupportedFetch } from "./fetch-types"
 
 export interface ClientOptions {
   auth?: string
@@ -96,11 +125,18 @@ export interface ClientOptions {
   agent?: Agent
 }
 
+type FileParam = {
+  filename?: string
+  data: string | Blob
+}
+
 export interface RequestParameters {
   path: string
   method: Method
   query?: QueryParams
   body?: Record<string, unknown>
+  formDataParams?: Record<string, string | FileParam>
+  headers?: Record<string, string>
   /**
    * To authenticate using public API token, `auth` should be passed as a
    * string. If you are trying to complete OAuth, then `auth` should be an object
@@ -125,36 +161,28 @@ export default class Client {
   #agent: Agent | undefined
   #userAgent: string
 
-  static readonly defaultNotionVersion = "2022-06-28"
+  static readonly defaultNotionVersion = "2025-09-03"
 
   public constructor(options?: ClientOptions) {
     this.#auth = options?.auth
     this.#logLevel = options?.logLevel ?? LogLevel.WARN
     this.#logger = options?.logger ?? makeConsoleLogger(PACKAGE_NAME)
-    this.#prefixUrl = (options?.baseUrl ?? "https://api.notion.com") + "/v1/"
+    this.#prefixUrl = `${options?.baseUrl ?? "https://api.notion.com"}/v1/`
     this.#timeoutMs = options?.timeoutMs ?? 60_000
     this.#notionVersion = options?.notionVersion ?? Client.defaultNotionVersion
-    this.#fetch = options?.fetch ?? nodeFetch
+    this.#fetch = options?.fetch ?? fetch
     this.#agent = options?.agent
     this.#userAgent = `notionhq-client/${PACKAGE_VERSION}`
   }
 
   /**
    * Sends a request.
-   *
-   * @param path
-   * @param method
-   * @param query
-   * @param body
-   * @returns
    */
-  public async request<ResponseBody>({
-    path,
-    method,
-    query,
-    body,
-    auth,
-  }: RequestParameters): Promise<ResponseBody> {
+  public async request<ResponseBody extends object>(
+    args: RequestParameters
+  ): Promise<ResponseBody> {
+    const { path, method, query, body, formDataParams, auth } = args
+
     this.log(LogLevel.INFO, "request start", { method, path })
 
     // If the body is empty, don't send the body in the HTTP request
@@ -168,9 +196,9 @@ export default class Client {
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) {
           if (Array.isArray(value)) {
-            value.forEach(val =>
+            for (const val of value) {
               url.searchParams.append(key, decodeURIComponent(val))
-            )
+            }
           } else {
             url.searchParams.append(key, String(value))
           }
@@ -194,6 +222,10 @@ export default class Client {
     }
 
     const headers: Record<string, string> = {
+      // Request-level custom additional headers can be provided, but
+      // don't allow them to override all other headers, e.g. the
+      // standard user agent.
+      ...args.headers,
       ...authorizationHeader,
       "Notion-Version": this.#notionVersion,
       "user-agent": this.#userAgent,
@@ -202,12 +234,33 @@ export default class Client {
     if (bodyAsJsonString !== undefined) {
       headers["content-type"] = "application/json"
     }
+
+    let formData: FormData | undefined
+    if (formDataParams) {
+      delete headers["content-type"]
+
+      formData = new FormData()
+      for (const [key, value] of Object.entries(formDataParams)) {
+        if (typeof value === "string") {
+          formData.append(key, value)
+        } else if (typeof value === "object") {
+          formData.append(
+            key,
+            typeof value.data === "object"
+              ? value.data
+              : new Blob([value.data]),
+            value.filename
+          )
+        }
+      }
+    }
+
     try {
       const response = await RequestTimeoutError.rejectAfterTimeout(
         this.#fetch(url.toString(), {
           method: method.toUpperCase(),
           headers,
-          body: bodyAsJsonString,
+          body: bodyAsJsonString ?? formData,
           agent: this.#agent,
         }),
         this.#timeoutMs
@@ -219,7 +272,13 @@ export default class Client {
       }
 
       const responseJson: ResponseBody = JSON.parse(responseText)
-      this.log(LogLevel.INFO, `request success`, { method, path })
+      this.log(LogLevel.INFO, "request success", {
+        method,
+        path,
+        ...("request_id" in responseJson && responseJson.request_id
+          ? { requestId: responseJson.request_id }
+          : {}),
+      })
       return responseJson
     } catch (error: unknown) {
       if (!isNotionClientError(error)) {
@@ -227,14 +286,17 @@ export default class Client {
       }
 
       // Log the error if it's one of our known error types
-      this.log(LogLevel.WARN, `request fail`, {
+      this.log(LogLevel.WARN, "request fail", {
         code: error.code,
         message: error.message,
+        ...("request_id" in error && error.request_id
+          ? { requestId: error.request_id }
+          : {}),
       })
 
       if (isHTTPResponseError(error)) {
         // The response body may contain sensitive information so it is logged separately at the DEBUG level
-        this.log(LogLevel.DEBUG, `failed response body`, {
+        this.log(LogLevel.DEBUG, "failed response body", {
           body: error.body,
         })
       }
@@ -327,23 +389,6 @@ export default class Client {
 
   public readonly databases = {
     /**
-     * List databases
-     *
-     * @deprecated Please use `search`
-     */
-    list: (
-      args: WithAuth<ListDatabasesParameters>
-    ): Promise<ListDatabasesResponse> => {
-      return this.request<ListDatabasesResponse>({
-        path: listDatabases.path(),
-        method: listDatabases.method,
-        query: pick(args, listDatabases.queryParams),
-        body: pick(args, listDatabases.bodyParams),
-        auth: args?.auth,
-      })
-    },
-
-    /**
      * Retrieve a database
      */
     retrieve: (
@@ -354,21 +399,6 @@ export default class Client {
         method: getDatabase.method,
         query: pick(args, getDatabase.queryParams),
         body: pick(args, getDatabase.bodyParams),
-        auth: args?.auth,
-      })
-    },
-
-    /**
-     * Query a database
-     */
-    query: (
-      args: WithAuth<QueryDatabaseParameters>
-    ): Promise<QueryDatabaseResponse> => {
-      return this.request<QueryDatabaseResponse>({
-        path: queryDatabase.path(args),
-        method: queryDatabase.method,
-        query: pick(args, queryDatabase.queryParams),
-        body: pick(args, queryDatabase.bodyParams),
         auth: args?.auth,
       })
     },
@@ -399,6 +429,68 @@ export default class Client {
         method: updateDatabase.method,
         query: pick(args, updateDatabase.queryParams),
         body: pick(args, updateDatabase.bodyParams),
+        auth: args?.auth,
+      })
+    },
+  }
+
+  public readonly dataSources = {
+    /**
+     * Retrieve a data source
+     */
+    retrieve: (
+      args: WithAuth<GetDataSourceParameters>
+    ): Promise<GetDataSourceResponse> => {
+      return this.request<GetDataSourceResponse>({
+        path: getDataSource.path(args),
+        method: getDataSource.method,
+        query: pick(args, getDataSource.queryParams),
+        body: pick(args, getDataSource.bodyParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * Query a data source
+     */
+    query: (
+      args: WithAuth<QueryDataSourceParameters>
+    ): Promise<QueryDataSourceResponse> => {
+      return this.request<QueryDataSourceResponse>({
+        path: queryDataSource.path(args),
+        method: queryDataSource.method,
+        query: pick(args, queryDataSource.queryParams),
+        body: pick(args, queryDataSource.bodyParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * Create a data source
+     */
+    create: (
+      args: WithAuth<CreateDataSourceParameters>
+    ): Promise<CreateDataSourceResponse> => {
+      return this.request<CreateDataSourceResponse>({
+        path: createDataSource.path(),
+        method: createDataSource.method,
+        query: pick(args, createDataSource.queryParams),
+        body: pick(args, createDataSource.bodyParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * Update a data source
+     */
+    update: (
+      args: WithAuth<UpdateDataSourceParameters>
+    ): Promise<UpdateDataSourceResponse> => {
+      return this.request<UpdateDataSourceResponse>({
+        path: updateDataSource.path(args),
+        method: updateDataSource.method,
+        query: pick(args, updateDataSource.queryParams),
+        body: pick(args, updateDataSource.bodyParams),
         auth: args?.auth,
       })
     },
@@ -536,6 +628,106 @@ export default class Client {
         auth: args?.auth,
       })
     },
+
+    /**
+     * Retrieve a comment
+     */
+    retrieve: (
+      args: WithAuth<GetCommentParameters>
+    ): Promise<GetCommentResponse> => {
+      return this.request<GetCommentResponse>({
+        path: getComment.path(args),
+        method: getComment.method,
+        query: pick(args, getComment.queryParams),
+        body: pick(args, getComment.bodyParams),
+        auth: args?.auth,
+      })
+    },
+  }
+
+  public readonly fileUploads = {
+    /**
+     * Create a file upload
+     */
+    create: (
+      args: WithAuth<CreateFileUploadParameters>
+    ): Promise<CreateFileUploadResponse> => {
+      return this.request<CreateFileUploadResponse>({
+        path: createFileUpload.path(),
+        method: createFileUpload.method,
+        query: pick(args, createFileUpload.queryParams),
+        body: pick(args, createFileUpload.bodyParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * Retrieve a file upload
+     */
+    retrieve: (
+      args: WithAuth<GetFileUploadParameters>
+    ): Promise<GetFileUploadResponse> => {
+      return this.request<GetFileUploadResponse>({
+        path: getFileUpload.path(args),
+        method: getFileUpload.method,
+        query: pick(args, getFileUpload.queryParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * List file uploads
+     */
+    list: (
+      args: WithAuth<ListFileUploadsParameters>
+    ): Promise<ListFileUploadsResponse> => {
+      return this.request<ListFileUploadsResponse>({
+        path: listFileUploads.path(),
+        method: listFileUploads.method,
+        query: pick(args, listFileUploads.queryParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * Send a file upload
+     *
+     * Requires a `file_upload_id`, obtained from the `id` of the Create File
+     * Upload API response.
+     *
+     * The `file` parameter contains the raw file contents or Blob/File object
+     * under `file.data`, and an optional `file.filename` string.
+     *
+     * Supply a stringified `part_number` parameter when using file uploads
+     * in multi-part mode.
+     *
+     * This endpoint sends HTTP multipart/form-data instead of JSON parameters.
+     */
+    send: (
+      args: WithAuth<SendFileUploadParameters>
+    ): Promise<SendFileUploadResponse> => {
+      return this.request<SendFileUploadResponse>({
+        path: sendFileUpload.path(args),
+        method: sendFileUpload.method,
+        query: pick(args, sendFileUpload.queryParams),
+        formDataParams: pick(args, sendFileUpload.formDataParams),
+        auth: args?.auth,
+      })
+    },
+
+    /**
+     * Complete a file upload
+     */
+    complete: (
+      args: WithAuth<CompleteFileUploadParameters>
+    ): Promise<CompleteFileUploadResponse> => {
+      return this.request<CompleteFileUploadResponse>({
+        path: completeFileUpload.path(args),
+        method: completeFileUpload.method,
+        query: pick(args, completeFileUpload.queryParams),
+        auth: args?.auth,
+      })
+    },
   }
 
   /**
@@ -568,6 +760,46 @@ export default class Client {
         method: oauthToken.method,
         query: pick(args, oauthToken.queryParams),
         body: pick(args, oauthToken.bodyParams),
+        auth: {
+          client_id: args.client_id,
+          client_secret: args.client_secret,
+        },
+      })
+    },
+    /**
+     * Introspect token
+     */
+    introspect: (
+      args: OauthIntrospectParameters & {
+        client_id: string
+        client_secret: string
+      }
+    ): Promise<OauthIntrospectResponse> => {
+      return this.request<OauthIntrospectResponse>({
+        path: oauthIntrospect.path(),
+        method: oauthIntrospect.method,
+        query: pick(args, oauthIntrospect.queryParams),
+        body: pick(args, oauthIntrospect.bodyParams),
+        auth: {
+          client_id: args.client_id,
+          client_secret: args.client_secret,
+        },
+      })
+    },
+    /**
+     * Revoke token
+     */
+    revoke: (
+      args: OauthRevokeParameters & {
+        client_id: string
+        client_secret: string
+      }
+    ): Promise<OauthRevokeResponse> => {
+      return this.request<OauthRevokeResponse>({
+        path: oauthRevoke.path(),
+        method: oauthRevoke.method,
+        query: pick(args, oauthRevoke.queryParams),
+        body: pick(args, oauthRevoke.bodyParams),
         auth: {
           client_id: args.client_id,
           client_secret: args.client_secret,
